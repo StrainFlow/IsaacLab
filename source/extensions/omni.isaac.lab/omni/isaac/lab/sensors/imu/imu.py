@@ -130,15 +130,20 @@ class Imu(SensorBase):
             )
         # obtain the poses of the sensors
         pos_w, quat_w = self._view.get_transforms()[env_ids].split([3, 4], dim=-1)
-        quat_w = math_utils.convert_quat(quat_w, to="wxyz")
+        quat_w = math_utils.convert_quat(quat_w, to="wxyz") # w^R_b
+
         # store the poses
         self._data.pos_w[env_ids] = pos_w + math_utils.quat_rotate(quat_w, self._offset_pos_b)
-        self._data.quat_w[env_ids] = math_utils.quat_mul(quat_w, self._offset_quat_b)
+        self._data.quat_w[env_ids] = math_utils.quat_mul(quat_w, self._offset_quat_b) # w^R_s
 
-        # obtain the velocities of the sensors
+        # obtain the velocities of the sensors (gets velocities of the COM of the link)
         lin_vel_w, ang_vel_w = self._view.get_velocities()[env_ids].split([3, 3], dim=-1)
+        # transform linear velocity from com to link origin
+        com_pos_b, _ = self._view.get_coms()[env_ids].split([3, 4], dim=-1)
+        lin_vel_w = lin_vel_w - torch.linalg.cross(ang_vel_w, math_utils.quat_rotate(quat_w, com_pos_b),dim=-1)
         # if an offset is present, the linear velocity has to be transformed taking the angular velocity into account
-        lin_vel_w = lin_vel_w + torch.cross(ang_vel_w, math_utils.quat_rotate(quat_w, self._offset_pos_b), dim=-1)
+        lin_vel_w = lin_vel_w + torch.linalg.cross(ang_vel_w, math_utils.quat_rotate(quat_w, self._offset_pos_b),dim=-1)
+
         # store the velocities
         self._data.ang_vel_b[env_ids] = math_utils.quat_rotate_inverse(self._data.quat_w[env_ids], ang_vel_w)
         self._data.lin_acc_b[env_ids] = math_utils.quat_rotate_inverse(
@@ -146,6 +151,7 @@ class Imu(SensorBase):
             (lin_vel_w - self._last_lin_vel_w[env_ids]) / max(self._dt, self.cfg.update_period),
         )
         self._last_lin_vel_w[env_ids] = lin_vel_w.clone()
+        self._last_ang_vel_w[env_ids] = ang_vel_w.clone()
 
     def _initialize_buffers_impl(self):
         """Create buffers for storing data."""
@@ -157,9 +163,11 @@ class Imu(SensorBase):
         self._data.ang_vel_b = torch.zeros(self._view.count, 3, device=self._device)
         # internal buffers
         self._last_lin_vel_w = torch.zeros(self._view.count, 3, device=self._device)
+        self._last_ang_vel_w = torch.zeros(self._view.count, 3, device=self._device)
         # store sensor offset transformation
         self._offset_pos_b = torch.tensor(list(self.cfg.offset.pos), device=self._device).repeat(self._view.count, 1)
         self._offset_quat_b = torch.tensor(list(self.cfg.offset.rot), device=self._device).repeat(self._view.count, 1)
+        # self._offset_quat_b = offset_quat_vec.repeat(self._view.count, 1)
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         # set visibility of markers

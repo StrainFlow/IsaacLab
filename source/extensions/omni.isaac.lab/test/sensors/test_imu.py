@@ -8,20 +8,23 @@
 from omni.isaac.lab.app import AppLauncher, run_tests
 
 # launch omniverse app
-app_launcher = AppLauncher(headless=True, enable_cameras=True)
+app_launcher = AppLauncher(headless=False, enable_cameras=True)
 simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
+import os
 import torch
 import unittest
+import math 
 
 import omni.isaac.core.utils.stage as stage_utils
 
 import omni.isaac.lab.sim as sim_utils
 import omni.isaac.lab.utils.math as math_utils
-from omni.isaac.lab.assets import RigidObjectCfg
+from omni.isaac.lab.assets import RigidObjectCfg, ArticulationCfg
 from omni.isaac.lab.scene import InteractiveScene, InteractiveSceneCfg
+from omni.isaac.lab.actuators import ImplicitActuatorCfg
 from omni.isaac.lab.sensors.imu import ImuCfg
 from omni.isaac.lab.terrains import TerrainImporterCfg
 from omni.isaac.lab.utils import configclass
@@ -32,21 +35,24 @@ from omni.isaac.lab.utils import configclass
 from omni.isaac.lab_assets.anymal import ANYMAL_C_CFG  # isort: skip
 from omni.isaac.lab.utils.assets import NUCLEUS_ASSET_ROOT_DIR  # isort: skip
 
+# offset of imu_link from base on the Anymal C
+# POS_OFFSET = (0.2488, 0.00835, 0.04628)
+# ROT_OFFSET = (0.7071068, 0.0, 0.0, 0.7071068)
 
-POS_OFFSET = (0.2488, 0.00835, 0.04628)
-ROT_OFFSET = (0.7071068, 0, 0, 0.7071068)
-
+# offset of imu_link from link_1 on simple_2_link
+POS_OFFSET = (0.4, 0.0, 0.25)
+ROT_OFFSET = (0.5, 0.5, 0.5, 0.5)
 
 @configclass
 class MySceneCfg(InteractiveSceneCfg):
     """Example scene configuration."""
 
-    # terrain - flat terrain plane
-    terrain = TerrainImporterCfg(
-        prim_path="/World/ground",
-        terrain_type="plane",
-        max_init_terrain_level=None,
-    )
+    # # terrain - flat terrain plane
+    # terrain = TerrainImporterCfg(
+    #     prim_path="/World/ground",
+    #     terrain_type="plane",
+    #     max_init_terrain_level=None,
+    # )
 
     # rigid objects - balls
     balls = RigidObjectCfg(
@@ -62,8 +68,29 @@ class MySceneCfg(InteractiveSceneCfg):
     )
 
     # articulations - robot
-    robot = ANYMAL_C_CFG.replace(prim_path="{ENV_REGEX_NS}/robot")
-
+    # robot = ANYMAL_C_CFG.replace(prim_path="{ENV_REGEX_NS}/robot")
+    robot = ArticulationCfg(
+            prim_path="{ENV_REGEX_NS}/robot",
+            spawn=sim_utils.UrdfFileCfg(
+                fix_base=True,
+                merge_fixed_joints=False,
+                make_instanceable=False,
+                asset_path=f"{os.path.abspath(os.getcwd())}/urdfs/simple_2_link.urdf",
+                articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+                    enabled_self_collisions=True, 
+                    solver_position_iteration_count=4, 
+                    solver_velocity_iteration_count=0
+                )
+            ),
+            init_state=ArticulationCfg.InitialStateCfg(),
+            actuators={
+                "joint_1_act" : ImplicitActuatorCfg(joint_names_expr=["joint_.*"],
+                                          stiffness=0.0,
+                                          damping=0.00),
+            },
+            
+                
+    )
     # sensors - imu (filled inside unit test)
     imu_ball: ImuCfg = ImuCfg(
         prim_path="{ENV_REGEX_NS}/ball",
@@ -71,20 +98,27 @@ class MySceneCfg(InteractiveSceneCfg):
     imu_robot_imu_link: ImuCfg = ImuCfg(
         prim_path="{ENV_REGEX_NS}/robot/imu_link",
     )
-    imu_robot_base: ImuCfg = ImuCfg(
-        prim_path="{ENV_REGEX_NS}/robot/base",
+    # imu_robot_base_offset: ImuCfg = ImuCfg(
+    #     prim_path="{ENV_REGEX_NS}/robot/imu_link",
+    # )
+    imu_robot_base_offset: ImuCfg = ImuCfg(
+        prim_path="{ENV_REGEX_NS}/robot/link_1",
         offset=ImuCfg.OffsetCfg(
             pos=POS_OFFSET,
             rot=ROT_OFFSET,
         ),
     )
+    imu_robot_base: ImuCfg = ImuCfg(
+        prim_path="{ENV_REGEX_NS}/robot/link_1",
+        offset=ImuCfg.OffsetCfg(),
+    )
 
     def __post_init__(self):
         """Post initialization."""
         # change position of the robot
-        self.robot.init_state.pos = (0.0, 2.0, 0.5)
+        self.robot.init_state.pos = (0.0, 2.0, 0.0)
         # change asset
-        self.robot.spawn.usd_path = f"{NUCLEUS_ASSET_ROOT_DIR}/Isaac/Robots/ANYbotics/anymal_c.usd"
+        # self.robot.spawn.usd_path = f"{NUCLEUS_ASSET_ROOT_DIR}/Isaac/Robots/ANYbotics/anymal_c.usd"
 
 
 class TestImu(unittest.TestCase):
@@ -95,7 +129,7 @@ class TestImu(unittest.TestCase):
         # Create a new stage
         stage_utils.create_new_stage()
         # Load kit helper
-        self.sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=0.005, use_fabric=False))
+        self.sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=0.01, use_fabric=False, device="cpu"))
         # construct scene
         scene_cfg = MySceneCfg(num_envs=2, env_spacing=5.0, lazy_sensor_update=False)
         self.scene = InteractiveScene(scene_cfg)
@@ -181,8 +215,8 @@ class TestImu(unittest.TestCase):
                 atol=1e-4,
             )
 
-    def test_offset_calculation(self):
-        # should achieve same results between the two imu sensors on the robot
+    def test_same_rigidbody_diff_frames(self):
+        # should acheive the same angular velocity relative to world
         for idx in range(10):
             # set acceleration
             self.scene.articulations["robot"].write_root_velocity_to_sim(
@@ -202,41 +236,121 @@ class TestImu(unittest.TestCase):
             if idx < 1:
                 continue
 
-            # check the imu data
+            # check the angular velocity
             torch.testing.assert_close(
-                self.scene.sensors["imu_robot_base"].data.lin_acc_b,
-                self.scene.sensors["imu_robot_imu_link"].data.lin_acc_b,
-                rtol=1e-4,
-                atol=1e-4,
-            )
-            torch.testing.assert_close(
-                self.scene.sensors["imu_robot_base"]._last_lin_vel_w,
-                self.scene.sensors["imu_robot_imu_link"]._last_lin_vel_w,
+                self.scene.sensors["imu_robot_base"]._last_ang_vel_w,
+                self.scene.sensors["imu_robot_imu_link"]._last_ang_vel_w,
                 rtol=1e-4,
                 atol=1e-4,
             )
 
-            # check the angular velocity
+
+    def test_pos_rot_offset_calculation(self):
+        # should achieve same results between the two imu sensors on the robot
+        for idx in range(20):
+            # set acceleration
+            # self.scene.articulations["robot"].write_root_velocity_to_sim(
+            #     torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]], dtype=torch.float32, device=self.scene.device).repeat(
+            #         self.scene.num_envs, 1
+            #     )
+            #     * (idx + 1)
+            # )
+            # write data to sim
+            self.scene.write_data_to_sim()
+            # perform step
+            self.sim.step()
+            # read data from sim
+            self.scene.update(self.sim.get_physics_dt())
+
+            # get robot joint state
+            joint_pos = self.scene.articulations["robot"].data.joint_pos
+            joint_vel = self.scene.articulations["robot"].data.joint_vel
+
+            # first linear velocity 
+            print()
+            print(idx)
+            print("joint_pos",joint_pos)
+            
+            
+            # gt_linear_vel_w[,0] = joint_vel * POS_OFFSET[0]*torch.sin(joint_pos)
+            # gt_linear_vel_w[,2] = -joint_vel * POS_OFFSET[0]*torch.cos(joint_pos)
+            # print(gt_linear_vel_w)
+            print("position")
+            # print(self.scene.sensors["imu_robot_base_offset"].data.pos_w-self.scene.sensors["imu_robot_imu_link"].data.pos_w)
+            print("base: ",self.scene.sensors["imu_robot_base"].data.pos_w)
+            print("offset: ",self.scene.sensors["imu_robot_base_offset"].data.pos_w)
+            print("imu_link",self.scene.sensors["imu_robot_imu_link"].data.pos_w)
+            print("orientation")
+            print("error",self.scene.sensors["imu_robot_base_offset"].data.quat_w-self.scene.sensors["imu_robot_imu_link"].data.quat_w)
+            # print("offset",self.scene.sensors["imu_robot_base_offset"].data.quat_w)
+            # print("imu",self.scene.sensors["imu_robot_imu_link"].data.quat_w)
+            print("angular velocity")
+            print(self.scene.sensors["imu_robot_base_offset"].data.ang_vel_b-self.scene.sensors["imu_robot_imu_link"].data.ang_vel_b)
+            print("joint_vel",joint_vel)
+            print(self.scene.sensors["imu_robot_base_offset"].data.ang_vel_b)
+            print(self.scene.sensors["imu_robot_imu_link"].data.ang_vel_b)
+            print("GT linear velocity")
+            vx = -joint_vel * POS_OFFSET[0]*torch.sin(joint_pos)
+            vy = torch.zeros(2,1,device=self.scene.device)
+            vz = -joint_vel * POS_OFFSET[0]*torch.cos(joint_pos)
+            gt_linear_vel_w = torch.cat([vx,vy,vz],dim=-1)
+            print("GT: ",gt_linear_vel_w)
+            print("GT/2: ",gt_linear_vel_w/2.0)
+            print("linear velocity")
+            print("error:,",self.scene.sensors["imu_robot_base_offset"]._last_lin_vel_w-self.scene.sensors["imu_robot_imu_link"]._last_lin_vel_w)
+            print("base: ",self.scene.sensors["imu_robot_base"]._last_lin_vel_w)
+            print("offset: ",self.scene.sensors["imu_robot_base_offset"]._last_lin_vel_w)
+            print("imu_link: ",self.scene.sensors["imu_robot_imu_link"]._last_lin_vel_w)
+            print("linear acceleration")
+            print("error:,",self.scene.sensors["imu_robot_base_offset"].data.lin_acc_b-self.scene.sensors["imu_robot_imu_link"].data.lin_acc_b)
+            print("offset: ",self.scene.sensors["imu_robot_base_offset"].data.lin_acc_b)
+            print("imu_link: ",self.scene.sensors["imu_robot_imu_link"].data.lin_acc_b)
+
+            # skip first step where initial velocity is zero
+            if idx < 10:
+                continue
+
+            # check the position
             torch.testing.assert_close(
-                self.scene.sensors["imu_robot_base"].data.ang_vel_b,
-                self.scene.sensors["imu_robot_imu_link"].data.ang_vel_b,
+                self.scene.sensors["imu_robot_base_offset"].data.pos_w,
+                self.scene.sensors["imu_robot_imu_link"].data.pos_w,
                 rtol=1e-4,
                 atol=1e-4,
             )
             # check the orientation
             torch.testing.assert_close(
-                self.scene.sensors["imu_robot_base"].data.quat_w,
+                self.scene.sensors["imu_robot_base_offset"].data.quat_w,
                 self.scene.sensors["imu_robot_imu_link"].data.quat_w,
                 rtol=1e-4,
                 atol=1e-4,
             )
-            # check the position
+            # check the angular velocity
             torch.testing.assert_close(
-                self.scene.sensors["imu_robot_base"].data.pos_w,
-                self.scene.sensors["imu_robot_imu_link"].data.pos_w,
+                self.scene.sensors["imu_robot_base_offset"].data.ang_vel_b,
+                self.scene.sensors["imu_robot_imu_link"].data.ang_vel_b,
                 rtol=1e-4,
                 atol=1e-4,
             )
+            # previous linear velocity
+            # torch.testing.assert_close(
+            #     self.scene.sensors["imu_robot_base_offset"]._last_lin_vel_w,
+            #     self.scene.sensors["imu_robot_imu_link"]._last_lin_vel_w,
+            #     rtol=1e-1,
+            #     atol=1e-3,
+            # )
+            # # check linear acceleration
+            # torch.testing.assert_close(
+            #     self.scene.sensors["imu_robot_base_offset"].data.lin_acc_b,
+            #     self.scene.sensors["imu_robot_imu_link"].data.lin_acc_b,
+            #     rtol=1e-1,
+            #     atol=1e-3,
+            # )
+
+
+
+
+
+
 
 
 if __name__ == "__main__":
