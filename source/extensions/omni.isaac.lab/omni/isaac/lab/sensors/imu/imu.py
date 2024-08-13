@@ -119,7 +119,7 @@ class Imu(SensorBase):
             self._view = self._physics_sim_view.create_rigid_body_view(self.cfg.prim_path.replace(".*", "*"))
         else:
             raise RuntimeError(f"Failed to find a RigidBodyAPI for the prim paths: {self.cfg.prim_path}")
-
+        
         # Create internal buffers
         self._initialize_buffers_impl()
 
@@ -137,16 +137,20 @@ class Imu(SensorBase):
         self._data.pos_w[env_ids] = pos_w + math_utils.quat_rotate(quat_w, self._offset_pos_b)
         self._data.quat_w[env_ids] = math_utils.quat_mul(quat_w, self._offset_quat_b)
 
+
         # obtain the velocities of the sensors
         lin_vel_w, ang_vel_w = self._view.get_velocities()[env_ids].split([3, 3], dim=-1)
+        # # transform linear velocity from com to link origin
         # if an offset is present, the linear velocity has to be transformed taking the angular velocity into account
-        lin_vel_w += torch.cross(ang_vel_w, math_utils.quat_rotate(quat_w, self._offset_pos_b), dim=-1)
+        lin_vel_w += torch.linalg.cross(ang_vel_w, math_utils.quat_rotate(quat_w, self._offset_pos_b- self._com_pos_b[env_ids]), dim=-1)
         # obtain the acceleration of the sensors
         lin_acc_w, ang_acc_w = self._view.get_accelerations()[env_ids].split([3, 3], dim=-1)
+        # # transform linear acceleration from com to link origin
         # if an offset is present, the linear acceleration has to be transformed taking the angular velocity and acceleration into account
-        lin_acc_w += torch.cross(ang_acc_w, math_utils.quat_rotate(quat_w, self._offset_pos_b), dim=-1) + torch.cross(
-            ang_vel_w, torch.cross(ang_vel_w, math_utils.quat_rotate(quat_w, self._offset_pos_b), dim=-1), dim=-1
+        lin_acc_w += torch.cross(ang_acc_w, math_utils.quat_rotate(quat_w, self._offset_pos_b- self._com_pos_b[env_ids]), dim=-1) + torch.cross(
+            ang_vel_w, torch.cross(ang_vel_w, math_utils.quat_rotate(quat_w, self._offset_pos_b- self._com_pos_b[env_ids]), dim=-1), dim=-1
         )
+        lin_acc_w -= self._lin_acc_w_grav
         # store the velocities
         self._data.lin_vel_b[env_ids] = math_utils.quat_rotate_inverse(self._data.quat_w[env_ids], lin_vel_w)
         self._data.ang_vel_b[env_ids] = math_utils.quat_rotate_inverse(self._data.quat_w[env_ids], ang_vel_w)
@@ -167,6 +171,11 @@ class Imu(SensorBase):
         # store sensor offset transformation
         self._offset_pos_b = torch.tensor(list(self.cfg.offset.pos), device=self._device).repeat(self._view.count, 1)
         self._offset_quat_b = torch.tensor(list(self.cfg.offset.rot), device=self._device).repeat(self._view.count, 1)
+        # store COM offset
+        com_pos_b, _ = self._view.get_coms().split([3, 4], dim=-1)
+        self._com_pos_b = torch.tensor(com_pos_b.tolist(),device=self._device).repeat(self._view.count, 1)
+        # stor gravity acceleration offset
+        self._lin_acc_w_grav = torch.tensor([0.0, 0.0, 9.81],device=self._device).repeat(self._view.count, 1)
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         # set visibility of markers
