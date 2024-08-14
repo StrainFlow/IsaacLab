@@ -150,7 +150,7 @@ class Imu(SensorBase):
         lin_acc_w += torch.cross(ang_acc_w, math_utils.quat_rotate(quat_w, self._offset_pos_b- self._com_pos_b[env_ids]), dim=-1) + torch.cross(
             ang_vel_w, torch.cross(ang_vel_w, math_utils.quat_rotate(quat_w, self._offset_pos_b- self._com_pos_b[env_ids]), dim=-1), dim=-1
         )
-        lin_acc_w += self._lin_acc_w_grav
+        lin_acc_w -= self._lin_acc_w_grav
         # store the velocities
         self._data.lin_vel_b[env_ids] = math_utils.quat_rotate_inverse(self._data.quat_w[env_ids], lin_vel_w)
         self._data.ang_vel_b[env_ids] = math_utils.quat_rotate_inverse(self._data.quat_w[env_ids], ang_vel_w)
@@ -198,7 +198,7 @@ class Imu(SensorBase):
         # get marker location
         # -- base state
         base_pos_w = self._data.pos_w.clone()
-        base_pos_w[:, 2] += 0.5
+        # base_pos_w[:, 2] += 0.5
         # -- resolve the scales
         default_scale = self.acceleration_visualizer.cfg.markers["arrow"].scale
         arrow_scale = torch.tensor(default_scale, device=self.device).repeat(self._data.lin_acc_b.shape[0], 1)
