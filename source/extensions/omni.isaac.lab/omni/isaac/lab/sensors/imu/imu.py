@@ -150,7 +150,7 @@ class Imu(SensorBase):
         lin_acc_w += torch.cross(ang_acc_w, math_utils.quat_rotate(quat_w, self._offset_pos_b- self._com_pos_b[env_ids]), dim=-1) + torch.cross(
             ang_vel_w, torch.cross(ang_vel_w, math_utils.quat_rotate(quat_w, self._offset_pos_b- self._com_pos_b[env_ids]), dim=-1), dim=-1
         )
-        lin_acc_w -= self._lin_acc_w_grav
+        lin_acc_w += self._lin_acc_w_grav
         # store the velocities
         self._data.lin_vel_b[env_ids] = math_utils.quat_rotate_inverse(self._data.quat_w[env_ids], lin_vel_w)
         self._data.ang_vel_b[env_ids] = math_utils.quat_rotate_inverse(self._data.quat_w[env_ids], ang_vel_w)
@@ -175,7 +175,7 @@ class Imu(SensorBase):
         com_pos_b, _ = self._view.get_coms().split([3, 4], dim=-1)
         self._com_pos_b = torch.tensor(com_pos_b.tolist(),device=self._device).repeat(self._view.count, 1)
         # stor gravity acceleration offset
-        self._lin_acc_w_grav = torch.tensor([0.0, 0.0, 9.81],device=self._device).repeat(self._view.count, 1)
+        self._lin_acc_w_grav = torch.tensor([0.0, 0.0, -9.81],device=self._device).repeat(self._view.count, 1)
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         # set visibility of markers

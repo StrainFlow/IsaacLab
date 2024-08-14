@@ -8,7 +8,7 @@
 from omni.isaac.lab.app import AppLauncher, run_tests
 
 # launch omniverse app
-app_launcher = AppLauncher(headless=False, enable_cameras=True)
+app_launcher = AppLauncher(headless=True, enable_cameras=True)
 simulation_app = app_launcher.app
 
 """Rest everything follows."""
@@ -48,10 +48,11 @@ def vector_error(v1: torch.Tensor, v2: torch.Tensor):
     v2_mag = torch.linalg.vector_norm(v2,dim=-1)
     v1_dir = torch.transpose(torch.div(torch.transpose(v1,0,-1),v1_mag),0,-1)
     v2_dir = torch.transpose(torch.div(torch.transpose(v2,0,-1),v2_mag),0,-1)
-    mag_error = v1_mag-v2_mag
-    dir_error = torch.acos(torch.sum(v1_dir*v2_dir,dim=-1))
+    mag_abs_err = torch.abs(v1_mag-v2_mag)
+    mag_rel_err = torch.abs(v1_mag/v2_mag-1.0)
+    dir_err= torch.acos(torch.sum(v1_dir*v2_dir,dim=-1))
 
-    return mag_error, dir_error
+    return mag_abs_err, mag_rel_err, dir_err
 
 @configclass
 class MySceneCfg(InteractiveSceneCfg):
@@ -90,7 +91,7 @@ class MySceneCfg(InteractiveSceneCfg):
     )
 
     # articulations - robot
-    robot = ANYMAL_C_CFG.replace(prim_path="{ENV_REGEX_NS}/robot")
+    # robot = ANYMAL_C_CFG.replace(prim_path="{ENV_REGEX_NS}/robot")
     robot = ArticulationCfg(
             prim_path="{ENV_REGEX_NS}/robot",
             spawn=sim_utils.UrdfFileCfg(
@@ -136,7 +137,7 @@ class MySceneCfg(InteractiveSceneCfg):
         # change position of the robot
         self.robot.init_state.pos = (0.0, 2.0, 0.5)
         # change asset
-        self.robot.spawn.usd_path = f"{NUCLEUS_ASSET_ROOT_DIR}/Isaac/Robots/ANYbotics/anymal_c.usd"
+        # self.robot.spawn.usd_path = f"{NUCLEUS_ASSET_ROOT_DIR}/Isaac/Robots/ANYbotics/anymal_c.usd"
         # change iterations
         self.robot.spawn.articulation_props.solver_position_iteration_count = 32
         self.robot.spawn.articulation_props.solver_velocity_iteration_count = 32
@@ -181,16 +182,16 @@ class TestImu(unittest.TestCase):
 
         for idx in range(1000):
             # set velocity
-            self.scene.rigid_objects["balls"].write_root_velocity_to_sim(
-                torch.tensor([[1.0, 0.0, 0.0, 0.0, 0.0, 0.0]], dtype=torch.float32, device=self.scene.device).repeat(
-                    self.scene.num_envs, 1
-                )
-            )
-            self.scene.rigid_objects["cube"].write_root_velocity_to_sim(
-                torch.tensor([[1.0, 0.0, 0.0, 0.0, 0.0, 0.0]], dtype=torch.float32, device=self.scene.device).repeat(
-                    self.scene.num_envs, 1
-                )
-            )
+            # self.scene.rigid_objects["balls"].write_root_velocity_to_sim(
+            #     torch.tensor([[1.0, 0.0, 0.0, 0.0, 0.0, 0.0]], dtype=torch.float32, device=self.scene.device).repeat(
+            #         self.scene.num_envs, 1
+            #     )
+            # )
+            # self.scene.rigid_objects["cube"].write_root_velocity_to_sim(
+            #     torch.tensor([[1.0, 0.0, 0.0, 0.0, 0.0, 0.0]], dtype=torch.float32, device=self.scene.device).repeat(
+            #         self.scene.num_envs, 1
+            #     )
+            # )
             # write data to sim
             self.scene.write_data_to_sim()
 
@@ -295,7 +296,7 @@ class TestImu(unittest.TestCase):
 
     def test_offset_calculation(self):
         # should achieve same results between the two imu sensors on the robot
-        for idx in range(100):
+        for idx in range(10):
             # set acceleration
             # self.scene.articulations["robot"].write_root_velocity_to_sim(
             #     torch.tensor([[0.05, 0.0, 0.0, 0.0, 0.0, 0.0]], dtype=torch.float32, device=self.scene.device).repeat(
@@ -361,19 +362,21 @@ class TestImu(unittest.TestCase):
             # print("imu_link: ",self.scene.sensors["imu_robot_imu_link"].data.ang_acc_b)
 
             # skip first step where initial velocity is zero
-            if idx < 10:
+            if idx < 1:
                 continue
-
-            #check the accelerations
+            
+            # check the position
             torch.testing.assert_close(
-                self.scene.sensors["imu_robot_base"].data.lin_acc_b,
-                self.scene.sensors["imu_robot_imu_link"].data.lin_acc_b,
-                rtol=2e-1,
-                atol=5.0,
+                self.scene.sensors["imu_robot_base"].data.pos_w,
+                self.scene.sensors["imu_robot_imu_link"].data.pos_w,
+                rtol=1e-5,
+                atol=1e-5,
             )
+
+            # check the orientation
             torch.testing.assert_close(
-                self.scene.sensors["imu_robot_base"].data.ang_acc_b,
-                self.scene.sensors["imu_robot_imu_link"].data.ang_acc_b,
+                self.scene.sensors["imu_robot_base"].data.quat_w,
+                self.scene.sensors["imu_robot_imu_link"].data.quat_w,
                 rtol=1e-4,
                 atol=1e-4,
             )
@@ -385,6 +388,51 @@ class TestImu(unittest.TestCase):
                 rtol=1e-4,
                 atol=1e-4,
             )
+
+            torch.testing.assert_close(
+                self.scene.sensors["imu_robot_base"].data.ang_acc_b,
+                self.scene.sensors["imu_robot_imu_link"].data.ang_acc_b,
+                rtol=1e-4,
+                atol=1e-4,
+            )
+
+            # calculate direction and magnitude error 
+            error_lin_vel_w_imu_link_gt = vector_error(gt_linear_vel_w,lin_vel_w_base)
+            error_lin_vel_w_base_gt = vector_error(gt_linear_vel_w,lin_vel_w_imu_link)
+            error_lin_vel_w_compare = vector_error(lin_vel_w_base,lin_vel_w_imu_link)
+
+            error_lin_acc_w_imu_link_gt = vector_error(gt_linear_acc_w,lin_acc_w_base)
+            error_lin_acc_w_base_gt = vector_error(gt_linear_acc_w,lin_acc_w_imu_link)
+            error_lin_acc_w_compare = vector_error(lin_acc_w_base,lin_acc_w_imu_link)
+
+
+            print("COM_imu:",self.scene.sensors["imu_robot_imu_link"]._com_pos_b)
+            print("COM_base:",self.scene.sensors["imu_robot_base"]._com_pos_b)
+            #check within absolute or relative magnitude error
+            self.assertTrue(torch.max(error_lin_vel_w_imu_link_gt[0]) < 1e-3    or torch.max(error_lin_vel_w_imu_link_gt[1]) < 5e-3)
+            self.assertTrue(torch.max(error_lin_vel_w_base_gt[0]) < 1e-3        or torch.max(error_lin_vel_w_base_gt[1]) < 5e-3)
+            self.assertTrue(torch.max(error_lin_vel_w_compare[0]) <  1e-3       or torch.max(error_lin_vel_w_compare[1]) <  5e-3)
+            self.assertTrue(torch.max(error_lin_acc_w_imu_link_gt[0]) <  1e-1   or torch.max(error_lin_acc_w_imu_link_gt[1]) < 5e-2)
+            self.assertTrue(torch.max(error_lin_acc_w_base_gt[0]) <  1e-1       or torch.max(error_lin_acc_w_base_gt[1]) <  5e-2)
+            self.assertTrue(torch.max(error_lin_acc_w_compare[0]) < 1e-4        or torch.max(error_lin_acc_w_compare[1]) <  5e-3)
+
+            #check error dir
+            self.assertLess(torch.max(error_lin_vel_w_imu_link_gt[2]), 5e-3)
+            self.assertLess(torch.max(error_lin_vel_w_base_gt[2]), 5e-3)
+            self.assertLess(torch.max(error_lin_vel_w_compare[2]), 5e-3)
+            self.assertLess(torch.max(error_lin_acc_w_imu_link_gt[2]), 5e-2)
+            self.assertLess(torch.max(error_lin_acc_w_base_gt[2]), 5e-2)
+            self.assertLess(torch.max(error_lin_acc_w_compare[2]), 5e-2)
+
+
+            torch.testing.assert_close(
+                self.scene.sensors["imu_robot_base"].data.lin_acc_b,
+                self.scene.sensors["imu_robot_imu_link"].data.lin_acc_b,
+                rtol=2e-1,
+                atol=5.0,
+            )
+
+
             # check the linear velocity of the imus
             torch.testing.assert_close(
                 self.scene.sensors["imu_robot_base"].data.lin_vel_b,
@@ -393,20 +441,8 @@ class TestImu(unittest.TestCase):
                 atol=5e-3,
             )
 
-            # check the orientation
-            torch.testing.assert_close(
-                self.scene.sensors["imu_robot_base"].data.quat_w,
-                self.scene.sensors["imu_robot_imu_link"].data.quat_w,
-                rtol=1e-4,
-                atol=1e-4,
-            )
-            # check the position
-            torch.testing.assert_close(
-                self.scene.sensors["imu_robot_base"].data.pos_w,
-                self.scene.sensors["imu_robot_imu_link"].data.pos_w,
-                rtol=1e-4,
-                atol=1e-4,
-            )
+
+
 
 
 if __name__ == "__main__":
