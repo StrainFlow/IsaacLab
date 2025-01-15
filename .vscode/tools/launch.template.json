@@ -33,6 +33,14 @@
             "args" : ["--task", "Isaac-Reach-Franka-v0", "--num_envs", "32"],
             "program": "${workspaceFolder}/source/standalone/workflows/rsl_rl/play.py",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Leatherback 1",
+            "type": "python",
+            "request": "launch",
+            "args" : ["--task", "Leatherback_1-Direct-v0", "--num_envs", "16"],
+            "program": "${workspaceFolder}/source/standalone/environments/random_agent.py",
+            "console": "integratedTerminal"
         }
     ]
 }
