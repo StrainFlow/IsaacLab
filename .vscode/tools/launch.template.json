@@ -41,6 +41,38 @@
             "args" : ["--task", "Leatherback_1-Direct-v0", "--num_envs", "16"],
             "program": "${workspaceFolder}/source/standalone/environments/random_agent.py",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Leatherback 2",
+            "type": "python",
+            "request": "launch",
+            "args" : ["--task", "Leatherback_2-Direct-v0", "--num_envs", "16"],
+            "program": "${workspaceFolder}/source/standalone/environments/random_agent.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Leatherback 3",
+            "type": "python",
+            "request": "launch",
+            "args" : ["--task", "Leatherback_3-Direct-v0", "--num_envs", "512"],
+            "program": "${workspaceFolder}/source/standalone/workflows/skrl/train.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Leatherback 4",
+            "type": "python",
+            "request": "launch",
+            "args" : ["--task", "Leatherback_4-Direct-v0", "--num_envs", "512"],
+            "program": "${workspaceFolder}/source/standalone/workflows/skrl/train.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Leatherback 5",
+            "type": "python",
+            "request": "launch",
+            "args" : ["--task", "Leatherback_4-Direct-v0", "--num_envs", "512"],
+            "program": "${workspaceFolder}/source/standalone/workflows/skrl/train.py",
+            "console": "integratedTerminal"
         }
     ]
 }
