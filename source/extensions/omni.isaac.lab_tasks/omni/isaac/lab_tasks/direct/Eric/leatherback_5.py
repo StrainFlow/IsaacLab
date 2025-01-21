@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-# Train to drive to a point in the environment
+# Train to drive to a waypoint in the environment
 
 from __future__ import annotations
 
@@ -67,27 +67,15 @@ class LeatherbackEnv(DirectRLEnv):
 
         self._position_error = torch.zeros((self.num_envs, 2), device=self.device, dtype=torch.float32)
         self._position_dist = torch.zeros((self.num_envs,), device=self.device, dtype=torch.float32)
+
         self._target_positions = torch.zeros((self.num_envs, 2), device=self.device, dtype=torch.float32)
         self._markers_pos = torch.zeros((self.num_envs, 3), device=self.device, dtype=torch.float32)
+
         self._goal_reached = torch.zeros((self.num_envs), device=self.device, dtype=torch.int32)
 
         # Boundary parameters
         self.maximum_robot_distance: float = 10.0
         self.position_tolerance: float = 0.01
-
-        # Reward Scaling Coeficients
-        self.position_exponential_reward_coeff: float = 0.25
-        self.linear_velocity_min_value: float = 0.5
-        self.linear_velocity_max_value: float = 2.0
-        self.angular_velocity_min_value: float = 0.5
-        self.angular_velocity_max_value: float = 20.0
-        self.boundary_exponential_reward_coeff: float = 1.0
-        self.position_weight: float = 1.0
-        self.linear_velocity_weight: float = -0.05
-        self.angular_velocity_weight: float = -0.05
-        self.boundary_weight: float = -10.0
-        self.rew_action_rate_scale = -0.12
-        self.rew_joint_accel_scale = -2.5e-6
 
     def _setup_scene(self):
 
@@ -164,27 +152,24 @@ class LeatherbackEnv(DirectRLEnv):
     def _get_rewards(self) -> torch.Tensor:
 
         # position reward
-        position_rew = torch.exp(-self._position_dist / self.position_exponential_reward_coeff)
-        
-        # Checks if the goal is reached
-        self.goal_is_reached = (self._position_dist < self.position_tolerance).int()
+        self.position_exponential_reward_coeff: float = 0.25
+        position_rew = torch.exp(-self._position_dist / self.position_exponential_reward_coeff)        
         
         # Return the reward by combining the different components and adding the robot rewards
         return (
-            position_rew * self.position_weight
+            position_rew
         )
-
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         
         task_failed = self.episode_length_buf > self.max_episode_length
         
+        # Checks if the goal is reached
+        self.goal_is_reached = (self._position_dist < self.position_tolerance).int()        
         task_completed = self._goal_reached.clone()
     
         return task_failed, task_completed
 
-    # TODO: Rework this
-    # TODO: Don't forget to reset goal positions
     def _reset_idx(self, env_ids: Sequence[int] | None):
         if env_ids is None:
             env_ids = self.Leatherback._ALL_INDICES
@@ -222,7 +207,7 @@ class LeatherbackEnv(DirectRLEnv):
         self._steering_state[env_ids] = 0.0
         #endregion Reset Actions
 
-        #region Set Goals
+        #region Reset Goals
         # The position is picked randomly in a square centered on the origin
         self._target_positions[env_ids] = 2.0 * torch.rand((num_reset, 2), dtype=torch.float32, device=self.device) 
         self._target_positions[env_ids] += self.scene.env_origins[env_ids, :2]
