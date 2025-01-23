@@ -24,30 +24,33 @@ from omni.isaac.lab.utils import configclass
 class LeatherbackEnvCfg(DirectRLEnvCfg):
     
     # env
-    decimation = 2              # Decimation (number of time steps between actions)
-    episode_length_s = 5.0      # Max each episode should last in seconds
-    action_space = 1            # Number of actions the neural network should return    
-    observation_space = 1       # Number of observations fed into neural network
-    state_space = 0             # Observations to be used in Actor-Critic training
+    episode_length_s = 5.0      # Max each episode should last in seconds # TODO: What is an episode? 
+    observation_space = 1       # Number of observations fed into neural network # TODO: How does this relate to num_envs?
+    action_space = 1            # Number of actions the neural network should return
+    decimation = 2              # Number of simulation time steps between each round of observations and actions
 
-    # simulation
+    # Define simulation with timestep and decimation
     sim: SimulationCfg = SimulationCfg(dt=1 / 60, render_interval=decimation)
 
-    # robot
+    # Create An Instance of the Robot (Articulation) you will be using and override its prim path)
+    # This is custom-defined in Leatherback.py
     robot_cfg: ArticulationCfg = LEATHERBACK_CFG.replace(prim_path="/World/envs/env_.*/Robot")
     
+    # Identify the names of the wheel joint's drives
     throttle_dof_name = [
         "Wheel__Knuckle__Front_Left",
         "Wheel__Knuckle__Front_Right",
         "Wheel__Upright__Rear_Right",
         "Wheel__Upright__Rear_Left",
     ]
+    # Identify the names of the steering joint's drives
     steering_dof_name = [
         "Knuckle__Upright__Front_Right",
         "Knuckle__Upright__Front_Left",
     ]
 
-    # scene
+    # scene configuration
+    # TODO: Explain what replicate_phsyics is
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
     
 class LeatherbackEnv(DirectRLEnv):
