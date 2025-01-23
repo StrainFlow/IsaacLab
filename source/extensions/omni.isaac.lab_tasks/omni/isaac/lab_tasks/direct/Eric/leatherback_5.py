@@ -70,12 +70,21 @@ class LeatherbackEnv(DirectRLEnv):
 
         self._target_positions = torch.zeros((self.num_envs, 2), device=self.device, dtype=torch.float32)
         self._markers_pos = torch.zeros((self.num_envs, 3), device=self.device, dtype=torch.float32)
+        self.goal_reached = torch.zeros((self.num_envs,), device=self.device, dtype=torch.bool)
 
-        self._goal_reached = torch.zeros((self.num_envs), device=self.device, dtype=torch.int32)
+        # Action Parameters        
+        self.throttle_scale = 1
+        self.throttle_max = 50.0
+        self.steering_scale = 0.1
+        self.steering_max = 0.75
 
         # Boundary parameters
-        self.maximum_robot_distance: float = 10.0
-        self.position_tolerance: float = 0.01
+        self.reward_coeff: float = 1.0
+        self.position_tolerance: float = 0.2
+
+        # Reward Scales
+        self.position_rew_scale = 1
+        self.goal_reached_scale = 10
 
     def _setup_scene(self):
 
@@ -98,19 +107,14 @@ class LeatherbackEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         
-        throttle_scale = 1
-        throttle_max = 50.0
-        steering_scale = 0.1
-        steering_max = 0.75
-        
-        self._throttle_action = actions[:, 0].repeat_interleave(4).reshape((-1, 4)) * throttle_scale
+        self._throttle_action = actions[:, 0].repeat_interleave(4).reshape((-1, 4)) * self.throttle_scale
         self._throttle_action += self._throttle_state
-        self._throttle_action = torch.clamp(self._throttle_action, -throttle_max, throttle_max)
+        self._throttle_action = torch.clamp(self._throttle_action, -self.throttle_max, self.throttle_max)
         self._throttle_state = self._throttle_action
 
-        self._steering_action = actions[:, 1].repeat_interleave(2).reshape((-1, 2)) * steering_scale
+        self._steering_action = actions[:, 1].repeat_interleave(2).reshape((-1, 2)) * self.steering_scale
         self._steering_action += self._steering_state
-        self._steering_action = torch.clamp(self._steering_action, -steering_max, steering_max)
+        self._steering_action = torch.clamp(self._steering_action, -self.steering_max, self.steering_max)
         self._steering_state = self._steering_action
 
     def _apply_action(self) -> None:        
@@ -152,12 +156,12 @@ class LeatherbackEnv(DirectRLEnv):
     def _get_rewards(self) -> torch.Tensor:
 
         # position reward
-        self.position_exponential_reward_coeff: float = 0.25
-        position_rew = torch.exp(-self._position_dist / self.position_exponential_reward_coeff)        
+        position_rew = torch.exp(-self._position_dist / self.reward_coeff)      
+        self.goal_reached = (self._position_dist < self.position_tolerance).int()  
         
-        # Return the reward by combining the different components and adding the robot rewards
         return (
-            position_rew
+            position_rew * self.position_rew_scale 
+            + self.goal_reached * self.goal_reached_scale
         )
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -165,8 +169,7 @@ class LeatherbackEnv(DirectRLEnv):
         task_failed = self.episode_length_buf > self.max_episode_length
         
         # Checks if the goal is reached
-        self.goal_is_reached = (self._position_dist < self.position_tolerance).int()        
-        task_completed = self._goal_reached.clone()
+        task_completed = self.goal_reached   
     
         return task_failed, task_completed
 
@@ -180,8 +183,8 @@ class LeatherbackEnv(DirectRLEnv):
         #region Reset Robot
         # Reset from config
         default_state = self.Leatherback.data.default_root_state[env_ids]        # first three are pos, next 4 quats, next 3 vel, next 3 ang vel
-        leatherback_pose = default_state[env_ids, :7]                                  # proper way of getting default pose from config file
-        leatherback_velocities = default_state[env_ids, 7:]                            # proper way of getting default velocities from config file
+        leatherback_pose = default_state[:, :7]                                  # proper way of getting default pose from config file
+        leatherback_velocities = default_state[:, 7:]                            # proper way of getting default velocities from config file
         joint_positions = self.Leatherback.data.default_joint_pos[env_ids]       # proper way to get joint positions from config file
         joint_velocities = self.Leatherback.data.default_joint_vel[env_ids]      # proper way to get joint velocities form config file
 
@@ -219,9 +222,13 @@ class LeatherbackEnv(DirectRLEnv):
 
         #region Make sure the position error and position dist are up to date after the reset
         self._position_error[env_ids] = (
-            self._target_positions[env_ids] - self.Leatherback.data.root_pos_w[env_ids, :2][env_ids]
+            self._target_positions[env_ids] - self.Leatherback.data.root_pos_w[env_ids, :2]
         )
         self._position_dist[env_ids] = torch.linalg.norm(self._position_error[env_ids], dim=-1)
         #endregion
+
+        #region Reset Rewards
+        self.goal_reached[env_ids] = False
+        #endregion Reset Rewards
         
 
