@@ -70,7 +70,15 @@
             "name": "Leatherback 5",
             "type": "python",
             "request": "launch",
-            "args" : ["--task", "Leatherback_4-Direct-v0", "--num_envs", "512"],
+            "args" : ["--task", "Leatherback_5-Direct-v0", "--num_envs", "512"],
+            "program": "${workspaceFolder}/source/standalone/workflows/skrl/train.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Leatherback 6",
+            "type": "python",
+            "request": "launch",
+            "args" : ["--task", "Leatherback_6-Direct-v0", "--num_envs", "512"],
             "program": "${workspaceFolder}/source/standalone/workflows/skrl/train.py",
             "console": "integratedTerminal"
         }
