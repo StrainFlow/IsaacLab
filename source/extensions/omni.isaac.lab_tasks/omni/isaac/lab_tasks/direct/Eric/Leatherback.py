@@ -12,7 +12,7 @@ from omni.isaac.lab.assets import ArticulationCfg
 from omni.isaac.lab.utils.assets import REPO_ROOT_PATH
 
 ##
-# Configuration
+# Leatherback Configuration
 ##
 
 LEATHERBACK_CFG = ArticulationCfg(
@@ -34,6 +34,7 @@ LEATHERBACK_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
+        # Spawn the Robot 5cm above the ground so that it has a small, visible drop when it spawns
         pos=(0.0, 0.0, 0.05),
         joint_pos={
             "Wheel__Knuckle__Front_Left": 0.0,
@@ -46,6 +47,7 @@ LEATHERBACK_CFG = ArticulationCfg(
     ),
     actuators={
         "throttle": ImplicitActuatorCfg(
+            # The .* in this expression makes it a regular expression so it will match anything that starts with "Wheel"
             joint_names_expr=["Wheel.*"],
             effort_limit=40000.0,
             velocity_limit=100.0,
