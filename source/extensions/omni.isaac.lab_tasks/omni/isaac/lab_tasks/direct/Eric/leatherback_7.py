@@ -33,6 +33,8 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
     action_space = 2            # Number of actions the neural network should return    
     observation_space = 5       # Number of observations fed into neural network
     state_space = 0             # Observations to be used in Actor-Critic training
+    env_spacing = 16.0
+    num_goals = 10
 
     # simulation
     sim: SimulationCfg = SimulationCfg(dt=1 / 60, render_interval=decimation)
@@ -40,6 +42,13 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
     # robot
     robot_cfg: ArticulationCfg = LEATHERBACK_CFG.replace(prim_path="/World/envs/env_.*/Robot")
     waypoint_cfg: VisualizationMarkersCfg = WAYPOINT_CFG
+    
+    cone_cfgs = []
+
+    for i in range(num_goals):
+        cone_cfg = CONE_CFG.copy()
+        cone_cfg.prim_path = f"/World/envs/env_.*/Cone_{i}"
+        cone_cfgs.append(cone_cfg)
     
     throttle_dof_name = [
         "Wheel__Knuckle__Front_Left",
@@ -52,7 +61,6 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
         "Knuckle__Upright__Front_Left",
     ]
 
-    env_spacing = 32.0
 
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=env_spacing, replicate_physics=True)
@@ -72,7 +80,7 @@ class LeatherbackEnv(DirectRLEnv):
         self._goal_reached = torch.zeros((self.num_envs), device=self.device, dtype=torch.int32)
         self.task_completed = torch.zeros((self.num_envs), device=self.device, dtype=torch.bool)
 
-        self._num_goals = 10
+        self._num_goals = self.cfg.num_goals
 
         self._target_positions = torch.zeros((self.num_envs, self._num_goals, 2), device=self.device, dtype=torch.float32)
         self._markers_pos = torch.zeros((self.num_envs, self._num_goals, 3), device=self.device, dtype=torch.float32)
@@ -94,6 +102,10 @@ class LeatherbackEnv(DirectRLEnv):
 
         self.Leatherback = Articulation(self.cfg.robot_cfg)
         self.Waypoints = VisualizationMarkers(self.cfg.waypoint_cfg)
+        self.Cones = []
+
+        for cone_cfg in self.cfg.cone_cfgs:
+            self.Cones.append(RigidObject(cone_cfg))
         
         # add ground plane
         spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
@@ -240,6 +252,17 @@ class LeatherbackEnv(DirectRLEnv):
         self.Leatherback.write_root_velocity_to_sim(leatherback_velocities, env_ids)
         self.Leatherback.write_joint_state_to_sim(joint_positions, joint_velocities, None, env_ids)
         #endregion Reset Robot
+
+        #region Reset Cones
+        offset = 0.0
+        for cone in self.Cones:
+            cone_default_state = cone.data.default_root_state[env_ids].clone()
+            cone_pose = cone_default_state[:, :7]
+            cone_pose[:, :3] += self.scene.env_origins[env_ids]
+            cone_pose[:, 0] += offset
+            offset += 1.0 
+            cone.write_root_pose_to_sim(cone_pose, env_ids)
+        #endregion Reset Cones
 
         #region Reset Actions
         self._throttle_state[env_ids] = 0.0

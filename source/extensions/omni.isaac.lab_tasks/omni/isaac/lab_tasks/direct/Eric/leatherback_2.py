@@ -64,8 +64,6 @@ class LeatherbackEnv(DirectRLEnv):
         print("[DEBUG] Init Complete")
 
     def _setup_scene(self):
-        print("[DEBUG] Setup Scene Starting")
-
         self.Leatherback = Articulation(self.cfg.robot_cfg)
         
         # add ground plane
@@ -82,8 +80,6 @@ class LeatherbackEnv(DirectRLEnv):
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
-        print("[DEBUG] Setup Scene Complete")
-
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         
         throttle_scale = 0.01
@@ -98,28 +94,17 @@ class LeatherbackEnv(DirectRLEnv):
         self._steering_action += self.previous_steering
         self.previous_steering = self._steering_action
 
-        print("[DEBUG] Pre Physics Step Complete")
-
-    def _apply_action(self) -> None:
-        print("[DEBUG] Apply Action Starting")
-        
+    def _apply_action(self) -> None:        
         self.Leatherback.set_joint_velocity_target(self._throttle_action, joint_ids=self._throttle_dof_idx)
         self.Leatherback.set_joint_position_target(self._steering_action, joint_ids=self._steering_dof_idx)
 
-        print("[DEBUG] Apply Action Complete")
-
     def _get_observations(self) -> dict:
-        print("[DEBUG] Get Observations Starting")
-
         obs = torch.zeros((self.num_envs,1), dtype=torch.float32, device=self.device)
         observations = {"policy": obs}
 
-        print("[DEBUG] Get Observations Complete")
         return observations
 
     def _get_rewards(self) -> torch.Tensor:
-        print("[DEBUG] Get Rewards Starting")
-        print("[DEBUG] Get Rewards Complete")
         return torch.zeros((self.num_envs,), dtype=torch.float32, device=self.device)
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:

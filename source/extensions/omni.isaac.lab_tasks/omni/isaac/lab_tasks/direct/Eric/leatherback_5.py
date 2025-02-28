@@ -11,7 +11,7 @@ import torch
 from collections.abc import Sequence
 
 from .Leatherback import LEATHERBACK_CFG
-from .Cone import CONE_CFG
+from .Waypoint import WAYPOINT_CFG
 
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.assets import Articulation, ArticulationCfg
@@ -29,7 +29,7 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
     decimation = 2              # Decimation (number of time steps between actions)
     episode_length_s = 15.0     # Max each episode should last in seconds
     action_space = 2            # Number of actions the neural network should return    
-    observation_space = 11      # Number of observations fed into neural network
+    observation_space = 8       # Number of observations fed into neural network
     state_space = 0             # Observations to be used in Actor-Critic training
 
     # simulation
@@ -37,7 +37,7 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
 
     # robot
     robot_cfg: ArticulationCfg = LEATHERBACK_CFG.replace(prim_path="/World/envs/env_.*/Robot")
-    cone_cfg: VisualizationMarkersCfg = CONE_CFG
+    waypoint_cfg: VisualizationMarkersCfg = WAYPOINT_CFG
 
     throttle_dof_name = [
         "Wheel__Knuckle__Front_Left",
@@ -78,18 +78,16 @@ class LeatherbackEnv(DirectRLEnv):
         self.steering_scale = 0.1
         self.steering_max = 0.75
 
-        # Boundary parameters
+        # Reward parameters
         self.reward_coeff: float = 1.0
         self.position_tolerance: float = 0.2
-
-        # Reward Scales
         self.position_rew_scale = 1
         self.goal_reached_scale = 10
 
     def _setup_scene(self):
 
         self.Leatherback = Articulation(self.cfg.robot_cfg)
-        self.Cones = VisualizationMarkers(self.cfg.cone_cfg)
+        self.Waypoints = VisualizationMarkers(self.cfg.waypoint_cfg)
         
         # add ground plane
         spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
@@ -141,9 +139,6 @@ class LeatherbackEnv(DirectRLEnv):
                 torch.sin(target_heading_error).unsqueeze(dim=1),
                 self.Leatherback.data.root_lin_vel_b[:,0].unsqueeze(dim=1),
                 self.Leatherback.data.root_lin_vel_b[:,1].unsqueeze(dim=1),
-                self.Leatherback.data.root_lin_vel_b[:,2].unsqueeze(dim=1),
-                self.Leatherback.data.root_ang_vel_w[:,0].unsqueeze(dim=1),
-                self.Leatherback.data.root_ang_vel_w[:,1].unsqueeze(dim=1),
                 self.Leatherback.data.root_ang_vel_w[:,2].unsqueeze(dim=1),
                 self._throttle_state[:,0].unsqueeze(dim=1),
                 self._steering_state[:,0].unsqueeze(dim=1)
@@ -217,7 +212,7 @@ class LeatherbackEnv(DirectRLEnv):
 
         # Update the visual markers
         self._markers_pos[env_ids, :2] = self._target_positions[env_ids]
-        self.Cones.visualize(translations=self._markers_pos)
+        self.Waypoints.visualize(translations=self._markers_pos)
         #endregion Set Goals
 
         #region Make sure the position error and position dist are up to date after the reset

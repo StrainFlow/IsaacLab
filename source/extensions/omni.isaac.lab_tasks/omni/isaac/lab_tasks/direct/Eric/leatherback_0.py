@@ -29,16 +29,14 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
     action_space = 1            # Number of actions the neural network should return
     decimation = 2              # Number of simulation time steps between each round of observations and actions
 
-    # Define simulation with timestep and decimation
-    sim: SimulationCfg = SimulationCfg(dt=1 / 60, render_interval=decimation)
+    sim: SimulationCfg = SimulationCfg(dt=1 / 60, render_interval=decimation)   # Define simulation with timestep and decimation
 
     # Create An Instance of the Robot (Articulation) you will be using and override its prim path)
     # This is custom-defined in Leatherback.py
     robot_cfg: ArticulationCfg = LEATHERBACK_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
-    # scene configuration
     # TODO: Explain what replicate_phsyics is
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)    # scene configuration
     
 class LeatherbackEnv(DirectRLEnv):
     cfg: LeatherbackEnvCfg
@@ -51,9 +49,8 @@ class LeatherbackEnv(DirectRLEnv):
         self.Leatherback = Articulation(self.cfg.robot_cfg)
         
         # add ground plane
-        spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
+        spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())             
         
-        # clone, filter, and replicate
         self.scene.clone_environments(copy_from_source=False)       # Clones child environments from parent environment
         self.scene.filter_collisions(global_prim_paths=[])          # Prevents environments from colliding with each other
         
@@ -92,9 +89,7 @@ class LeatherbackEnv(DirectRLEnv):
         if env_ids is None:
             env_ids = self.Leatherback._ALL_INDICES
         super()._reset_idx(env_ids)
-
-        num_reset = len(env_ids)
-        
+       
         ## Reset from config
         default_state = self.Leatherback.data.default_root_state[env_ids]        # first three are pos, next 4 quats, next 3 vel, next 3 ang vel
         leatherback_pose = default_state[env_ids, :7]                            # proper way of getting default pose from config file
@@ -103,16 +98,6 @@ class LeatherbackEnv(DirectRLEnv):
         joint_velocities = self.Leatherback.data.default_joint_vel[env_ids]      # proper way to get joint velocities form config file
 
         leatherback_pose[:, :3] += self.scene.env_origins[env_ids]               # Adds center of each env position to leatherback position
-
-        # Randomize Starting Position
-        leatherback_pose[:, :2] += 2.0 * torch.rand((num_reset, 2), dtype=torch.float32, device=self.device)
-        
-        # Randomize starting Heading
-        angles = torch.pi * torch.rand((num_reset,), dtype=torch.float32, device=self.device)
-        
-        # Isaac Sim quaternions are W-first (w, x, y, z) To rotate about the Z axis, we'll modify the W and Z values
-        leatherback_pose[:, 3] = torch.cos(angles * 0.5)
-        leatherback_pose[:, 6] = torch.sin(angles * 0.5)
 
         self.Leatherback.write_root_pose_to_sim(leatherback_pose, env_ids)
         self.Leatherback.write_root_velocity_to_sim(leatherback_velocities, env_ids)
