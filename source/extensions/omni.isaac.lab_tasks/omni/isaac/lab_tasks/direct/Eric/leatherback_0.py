@@ -23,16 +23,15 @@ from omni.isaac.lab.utils import configclass
 @configclass
 class LeatherbackEnvCfg(DirectRLEnvCfg):
     
-    # env
     episode_length_s = 5.0      # Max each episode should last in seconds # TODO: What is an episode? 
     observation_space = 1       # Number of observations fed into neural network # TODO: How does this relate to num_envs?
     action_space = 1            # Number of actions the neural network should return
     decimation = 2              # Number of simulation time steps between each round of observations and actions
 
-    sim: SimulationCfg = SimulationCfg(dt=1 / 60, render_interval=decimation)   # Define simulation with timestep and decimation
+    # Define simulation with timestep and decimation
+    sim: SimulationCfg = SimulationCfg(dt=1 / 60, render_interval=decimation)   
 
-    # Create An Instance of the Robot (Articulation) you will be using and override its prim path)
-    # This is custom-defined in Leatherback.py
+    # Create An instance of the articulation config in Leatherback.py and override its prim path.
     robot_cfg: ArticulationCfg = LEATHERBACK_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
     # TODO: Explain what replicate_phsyics is
@@ -48,14 +47,12 @@ class LeatherbackEnv(DirectRLEnv):
     def _setup_scene(self):
         self.Leatherback = Articulation(self.cfg.robot_cfg)
         
-        # add ground plane
-        spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())             
+        spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())     # add ground plane             
         
-        self.scene.clone_environments(copy_from_source=False)       # Clones child environments from parent environment
-        self.scene.filter_collisions(global_prim_paths=[])          # Prevents environments from colliding with each other
+        self.scene.clone_environments(copy_from_source=False)                   # Clones child environments from parent environment
+        self.scene.filter_collisions(global_prim_paths=[])                      # Prevents environments from colliding with each other
         
-        # add articulation to scene
-        self.scene.articulations["leatherback"] = self.Leatherback
+        self.scene.articulations["leatherback"] = self.Leatherback              # add articulation to scene
         
         # add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
@@ -68,7 +65,6 @@ class LeatherbackEnv(DirectRLEnv):
         pass
 
     def _get_observations(self) -> dict:
-
         obs = torch.zeros((self.num_envs,1), dtype=torch.float32, device=self.device)
         observations = {"policy": obs}
 
@@ -76,13 +72,13 @@ class LeatherbackEnv(DirectRLEnv):
 
     def _get_rewards(self) -> torch.Tensor:
         rewards = torch.zeros((self.num_envs), dtype=torch.float32, device=self.device)
+        
         return rewards
 
-    def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
-        
+    def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:        
         failure_termination = self.episode_length_buf >= self.max_episode_length - 1
-        
         clean_termination = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
+
         return failure_termination, clean_termination
 
     def _reset_idx(self, env_ids: Sequence[int] | None):
@@ -90,15 +86,14 @@ class LeatherbackEnv(DirectRLEnv):
             env_ids = self.Leatherback._ALL_INDICES
         super()._reset_idx(env_ids)
        
-        ## Reset from config
         default_state = self.Leatherback.data.default_root_state[env_ids]        # first three are pos, next 4 quats, next 3 vel, next 3 ang vel
         leatherback_pose = default_state[env_ids, :7]                            # proper way of getting default pose from config file
+        leatherback_pose[:, :3] += self.scene.env_origins[env_ids]               # Adds center of each env position to leatherback position
+        self.Leatherback.write_root_pose_to_sim(leatherback_pose, env_ids)
+
         leatherback_velocities = default_state[env_ids, 7:]                      # proper way of getting default velocities from config file
+        self.Leatherback.write_root_velocity_to_sim(leatherback_velocities, env_ids)
+
         joint_positions = self.Leatherback.data.default_joint_pos[env_ids]       # proper way to get joint positions from config file
         joint_velocities = self.Leatherback.data.default_joint_vel[env_ids]      # proper way to get joint velocities form config file
-
-        leatherback_pose[:, :3] += self.scene.env_origins[env_ids]               # Adds center of each env position to leatherback position
-
-        self.Leatherback.write_root_pose_to_sim(leatherback_pose, env_ids)
-        self.Leatherback.write_root_velocity_to_sim(leatherback_velocities, env_ids)
         self.Leatherback.write_joint_state_to_sim(joint_positions, joint_velocities, None, env_ids)
