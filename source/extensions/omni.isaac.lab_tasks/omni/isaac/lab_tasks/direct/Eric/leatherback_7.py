@@ -31,7 +31,7 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
     decimation = 2              # Decimation (number of time steps between actions)
     episode_length_s = 30.0     # Max each episode should last in seconds
     action_space = 2            # Number of actions the neural network should return    
-    observation_space = 5       # Number of observations fed into neural network
+    observation_space = 9       # Number of observations fed into neural network
     state_space = 0             # Observations to be used in Actor-Critic training
     env_spacing = 16.0
     num_goals = 10
@@ -47,7 +47,7 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
 
     for i in range(num_goals):
         cone_cfg = CONE_CFG.copy()
-        cone_cfg.prim_path = f"/World/envs/env_.*/Cone_{i}"
+        cone_cfg.prim_path = f"/World/envs/env_.*/Cone{i}"
         cone_cfgs.append(cone_cfg)
     
     throttle_dof_name = [
@@ -60,7 +60,6 @@ class LeatherbackEnvCfg(DirectRLEnvCfg):
         "Knuckle__Upright__Front_Right",
         "Knuckle__Upright__Front_Left",
     ]
-
 
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=env_spacing, replicate_physics=True)
@@ -83,6 +82,7 @@ class LeatherbackEnv(DirectRLEnv):
         self._num_goals = self.cfg.num_goals
 
         self._target_positions = torch.zeros((self.num_envs, self._num_goals, 2), device=self.device, dtype=torch.float32)
+        self._cone_positions = torch.zeros((self.num_envs, self._num_goals, 2), device=self.device, dtype=torch.float32)
         self._markers_pos = torch.zeros((self.num_envs, self._num_goals, 3), device=self.device, dtype=torch.float32)
 
         self.env_spacing = self.cfg.env_spacing
@@ -149,6 +149,9 @@ class LeatherbackEnv(DirectRLEnv):
         self._position_error_vector = current_target_positions - self.Leatherback.data.root_pos_w[:, :2]
         self._previous_position_error = self._position_error.clone()
         self._position_error = torch.norm(self._position_error_vector, dim=-1)
+
+        # cone positions
+        current_cone_positions = self._cone_positions[self.Leatherback._ALL_INDICES, self._target_index]
         
         # heading error
         heading = self.Leatherback.data.heading_w
@@ -163,6 +166,10 @@ class LeatherbackEnv(DirectRLEnv):
         obs = torch.cat(
             (
                 self._position_error.unsqueeze(dim=1),
+                current_target_positions[:, 0].unsqueeze(dim=1),
+                current_target_positions[:, 1].unsqueeze(dim=1),
+                current_cone_positions[:, 0].unsqueeze(dim=1),
+                current_cone_positions[:, 1].unsqueeze(dim=1),
                 torch.cos(self.target_heading_error).unsqueeze(dim=1),
                 torch.sin(self.target_heading_error).unsqueeze(dim=1),
                 self._throttle_state[:,0].unsqueeze(dim=1),
@@ -253,17 +260,6 @@ class LeatherbackEnv(DirectRLEnv):
         self.Leatherback.write_joint_state_to_sim(joint_positions, joint_velocities, None, env_ids)
         #endregion Reset Robot
 
-        #region Reset Cones
-        offset = 0.0
-        for cone in self.Cones:
-            cone_default_state = cone.data.default_root_state[env_ids].clone()
-            cone_pose = cone_default_state[:, :7]
-            cone_pose[:, :3] += self.scene.env_origins[env_ids]
-            cone_pose[:, 0] += offset
-            offset += 1.0 
-            cone.write_root_pose_to_sim(cone_pose, env_ids)
-        #endregion Reset Cones
-
         #region Reset Actions
         self._throttle_state[env_ids] = 0.0
         self._steering_state[env_ids] = 0.0
@@ -285,6 +281,29 @@ class LeatherbackEnv(DirectRLEnv):
         self._markers_pos[env_ids, :, :2] = self._target_positions[env_ids]
         visualize_pos = self._markers_pos.view(-1, 3)
         self.Waypoints.visualize(translations=visualize_pos)
+        
+        #region Reset Cones
+        # HACK: this could be pre-calculated
+        offset = 0.5
+        self._cone_positions[env_ids] = self._target_positions[env_ids]
+        offset = torch.full((num_reset, self._num_goals), device=self.device, dtype=torch.float, fill_value=offset)
+        sign_pattern = torch.tensor([1 if j% 2 == 0 else -1 for j in range(self._num_goals)], device=self.device)
+        offset[:, :] *= sign_pattern
+        self._cone_positions[env_ids, :, 1] += offset
+
+        index: int = 0
+        for cone in self.Cones:
+            cone_default_state = cone.data.default_root_state[env_ids]
+            cone_pose = cone_default_state[:, :7]
+            cone_pose[:, 2] = 0.05
+            cone_pose[:, :2] = self._cone_positions[env_ids, index, :]
+            index += 1
+            cone.write_root_pose_to_sim(cone_pose, env_ids)
+
+            cone_velocities = cone_default_state[:, 7:]
+            cone.write_root_velocity_to_sim(cone_velocities, env_ids)
+        #endregion Reset Cones
+
         #endregion Reset Goals
 
         #region Make sure the position error and position dist are up to date after the reset
